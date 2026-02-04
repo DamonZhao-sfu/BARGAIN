@@ -136,23 +136,11 @@ class OpenAIOracle(Oracle):
         task_with_data = self.task.format(data_record)
         prompt=[
                     {"role": "system", "content": "You are a helpful assistant that is good at processing data."},
-                    {"role": "user", "content": f'''
-                        Consider the following task and a given response:
-                        
-                        Task:
-                        {task_with_data}
-
-                        Response: {proxy_output}
-
-                        Is the provided response correct? If the provided answer is incorrect, provide the correct answer.
-                        '''}
+                    {"role": "user", "content": task_with_data}
                 ]
-        response = self.client.beta.chat.completions.parse( model=self.model, messages=prompt, response_format=GeneralOracleAnswer, logprobs=False, seed=0, temperature=0)
-        res=json.loads(response.choices[0].message.content)
-        correct_answer = res['correct_answer']
-        if res['is_correct']:
-            correct_answer = proxy_output
-        return res['is_correct'], correct_answer
+        response = self.client.beta.chat.completions.parse( model=self.model, messages=prompt, logprobs=False, seed=0, temperature=0)
+        oracle_output=response.choices[0].message.content
+        return proxy_output == oracle_output, oracle_output
     
     def oracle_func(self, data_record, proxy_output):
         if self.is_binary:

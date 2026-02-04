@@ -152,7 +152,9 @@ class BARGAIN_A():
         oracle_indexes = np.setdiff1d(data_idxs, proxy_indxs)
         if self.verbose:
             print(f"Processing with Oracle")
-        oracle_outputs = self.oracle.get_pred(data_records[oracle_indexes], oracle_indexes)
+        oracle_id_to_index_in_data_ids = {id_: i for i, id_ in enumerate(data_idxs)}
+        oracle_indices_in_data_ids = [oracle_id_to_index_in_data_ids[oid] for oid in oracle_indexes]
+        oracle_outputs = self.oracle.get_pred(data_records[oracle_indices_in_data_ids], oracle_indexes)
 
         if self.verbose:
             print(f"Processing with Proxy")
