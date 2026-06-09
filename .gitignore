@@ -1,0 +1,10 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Test / benchmark outputs
+results/
