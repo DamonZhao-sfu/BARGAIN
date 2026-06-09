@@ -111,7 +111,8 @@ def _run_single_query(
     delta: float,
     proxy_model: str,
     oracle_model: str,
-    base_url: str,
+    proxy_url: str,
+    oracle_url: str,
     seed: int,
     proxy_workers: int,
     oracle_workers: int,
@@ -137,11 +138,11 @@ def _run_single_query(
         )
 
         proxy = VLLMProxy(
-            model=proxy_model, base_url=base_url,
+            model=proxy_model, base_url=proxy_url,
             system_prompt=system_prompt, max_workers=proxy_workers,
         )
         oracle = VLLMOracle(
-            model=oracle_model, base_url=base_url,
+            model=oracle_model, base_url=oracle_url,
             system_prompt=system_prompt, max_workers=oracle_workers,
         )
 
@@ -215,7 +216,20 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument(
         "--vllm-url",
         default=os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1"),
-        help="OpenAI-compatible vLLM endpoint base URL.",
+        help="Default OpenAI-compatible vLLM endpoint, used for whichever of "
+             "proxy/oracle does not get its own --proxy-url / --oracle-url.",
+    )
+    parser.add_argument(
+        "--proxy-url",
+        default=os.environ.get("BARGAIN_PROXY_URL"),
+        help="vLLM endpoint serving the proxy model "
+             "(default: BARGAIN_PROXY_URL env, else --vllm-url).",
+    )
+    parser.add_argument(
+        "--oracle-url",
+        default=os.environ.get("BARGAIN_ORACLE_URL"),
+        help="vLLM endpoint serving the oracle model "
+             "(default: BARGAIN_ORACLE_URL env, else --vllm-url).",
     )
     parser.add_argument("--proxy-workers", type=int, default=32,
                         help="Concurrent in-flight proxy requests.")
@@ -227,6 +241,11 @@ def main(argv: List[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # Per-model endpoints fall back to the shared --vllm-url when unset, so
+    # the single-server case keeps working unchanged.
+    proxy_url = args.proxy_url or args.vllm_url
+    oracle_url = args.oracle_url or args.vllm_url
+
     os.makedirs(args.results_dir, exist_ok=True)
     np.random.seed(args.seed)
 
@@ -235,9 +254,8 @@ def main(argv: List[str] | None = None) -> int:
 
     print(f"Running BARGAIN grid for: {tags}")
     print(
-        f"  vLLM URL : {args.vllm_url}\n"
-        f"  proxy    : {args.proxy_model}\n"
-        f"  oracle   : {args.oracle_model}\n"
+        f"  proxy    : {args.proxy_model} @ {proxy_url}\n"
+        f"  oracle   : {args.oracle_model} @ {oracle_url}\n"
         f"  budgets  : {args.budget_pcts} (% of dataset)\n"
         f"  target/delta : {args.target}/{args.delta}"
     )
@@ -254,7 +272,8 @@ def main(argv: List[str] | None = None) -> int:
                 target=args.target, delta=args.delta,
                 proxy_model=args.proxy_model,
                 oracle_model=args.oracle_model,
-                base_url=args.vllm_url,
+                proxy_url=proxy_url,
+                oracle_url=oracle_url,
                 seed=args.seed,
                 proxy_workers=args.proxy_workers,
                 oracle_workers=args.oracle_workers,
