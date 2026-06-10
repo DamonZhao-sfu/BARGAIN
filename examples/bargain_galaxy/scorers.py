@@ -172,42 +172,48 @@ def score_cars_q3(predicted_vins: Iterable[str], gt_path: str) -> Tuple[float, f
     )
 
 
-def score_cars_q4(
-    predicted_ids: Iterable[str], gt_path: str,
-    cars_csv: str | None = None,
-) -> Tuple[float, float, float]:
-    """Q4 evaluates a scalar (avg car age over engine-problem cars).
+def score_cars_q4(predicted_ids: Iterable[str], gt_path: str) -> Tuple[float, float, float]:
+    """Row-level F1 for Q4 (engine-complaint filter).
 
-    Returns ``1 - min(relative_error, 1)`` as the F1 proxy so the
-    column type matches the other scorers.
+    Scores the predicted positive car_ids against the per-row ground truth
+    at ``gt_path`` (``Q4_ground_truth_rows_sf9836.csv`` — one positive row
+    per engine-complaint car): precision / recall / F1 over car_id sets,
+    mirroring the other set-based filter scorers. Replaces the legacy
+    average-age relative-error proxy so F1 is the run's quality metric.
+
+    Diagnostic note: the printed GT / Pred / TP counts make a dataset
+    scale-factor mismatch obvious — if the predicted car_ids come from a
+    different scale factor than the ground-truth rows, TP collapses to ~0.
     """
-    pred_ids = {int(p) for p in (_normalize_car_id(v) for v in predicted_ids) if p}
-    if not pred_ids:
-        print(f"  [cars_q4] no predicted ids — F1=0")
+    try:
+        gt_df = pd.read_csv(gt_path, dtype=str)
+    except Exception as e:  # noqa: BLE001 — degrade to F1=0 on read failure
+        print(f"  [cars_q4] Error reading ground truth: {e}")
         return 0.0, 0.0, 0.0
+    gt_col = "car_id" if "car_id" in gt_df.columns else gt_df.columns[0]
+    gt_ids = {
+        cid for cid in (_normalize_car_id(v) for v in gt_df[gt_col].dropna())
+        if cid is not None
+    }
 
-    if cars_csv is None:
-        # Fall back to the canonical SemBench location used by LLMSQL.
-        cars_csv = "/localhome/hza214/SemBench/files/cars/data/sf_157376/car_data_157376.csv"
+    pred_ids = {
+        cid for cid in (_normalize_car_id(v) for v in predicted_ids)
+        if cid is not None
+    }
 
-    cars_df = pd.read_csv(cars_csv)
-    matched = cars_df[cars_df["car_id"].isin(pred_ids)]
-    if matched.empty:
-        print(f"  [cars_q4] no predicted ids matched cars table — F1=0")
-        return 0.0, 0.0, 0.0
-    pred_avg_age = float(2026 - matched["year"].mean())
-
-    scalar_gt = pd.read_csv(gt_path)
-    gt_avg_age = float(scalar_gt.iloc[0, 0])
-    abs_err = abs(pred_avg_age - gt_avg_age)
-    rel_err = abs_err / max(abs(gt_avg_age), 1e-12)
-    score = 1.0 - min(rel_err, 1.0)
+    tp = len(gt_ids & pred_ids)
+    fp = len(pred_ids - gt_ids)
+    fn = len(gt_ids - pred_ids)
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2 * precision * recall / (precision + recall)
+          if (precision + recall) > 0 else 0.0)
     print(
-        f"  [cars_q4] predicted_count={len(pred_ids)} "
-        f"pred_avg_age={pred_avg_age:.4f} gt_avg_age={gt_avg_age:.4f} "
-        f"rel_err={rel_err:.4f} score={score:.4f}"
+        f"  [cars_q4] GT: {len(gt_ids)}, Pred: {len(pred_ids)}, "
+        f"TP={tp} FP={fp} FN={fn}"
     )
-    return score, score, score
+    print(f"  [cars_q4] P={precision:.4f} R={recall:.4f} F1={f1:.4f}")
+    return precision, recall, f1
 
 
 def score_animals_q1(predicted_ids: Iterable[str], gt_path: str) -> Tuple[float, float, float]:

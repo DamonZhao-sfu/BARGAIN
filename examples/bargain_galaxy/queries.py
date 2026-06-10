@@ -430,8 +430,10 @@ def _build_cars_q3() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
 
 
 def _build_cars_q4() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
-    data_dir = os.path.join(SEMBENCH_ROOT, "cars/data/sf_157376")
-    complaints = pd.read_csv(os.path.join(data_dir, "text_complaints_data_157376.csv"))
+    # sf_9836 so the predicted car_id universe matches the row-level
+    # ground truth (Q4_ground_truth_rows_sf9836.csv) used by the scorer.
+    data_dir = os.path.join(SEMBENCH_ROOT, "cars/data/sf_9836")
+    complaints = pd.read_csv(os.path.join(data_dir, "text_complaints_data_9836.csv"))
     df = complaints[["car_id", "summary"]]
     prompt = (
         "You are given a textual complaint about a vehicle. Return true if "
@@ -908,7 +910,10 @@ def build_query_registry(results_dir: str) -> Dict[str, Query]:
         "cars_q4": Query(
             tag="cars_q4", kind="filter", modality="text",
             prompt="see _build_cars_q4",
-            gt_path=os.path.join(SEMBENCH_ROOT, "cars/raw_results/ground_truth/Q4.csv"),
+            gt_path=os.path.join(
+                SEMBENCH_ROOT,
+                "cars/raw_results/ground_truth/Q4_ground_truth_rows_sf9836.csv",
+            ),
             score_fn=_cars_q4_score,
             build_fn=_build_cars_q4,
             id_components=("car_id",),
