@@ -196,7 +196,7 @@ def main(argv: List[str] | None = None) -> int:
     )
     parser.add_argument(
         "--budget-pcts", nargs="+", type=float,
-        default=[1,2,3,4,5,6,7,8,9,10],
+        default=[1,3,5,7,9],
         help="Oracle-call budget as percentages of dataset size.",
     )
     parser.add_argument("--target", type=float, default=0.9,

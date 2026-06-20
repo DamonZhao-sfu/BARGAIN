@@ -35,7 +35,7 @@ SEMBENCH_ROOT = os.environ.get(
     "SEMBENCH_ROOT", "/localhome/hza214/SemBench/files",
 )
 LROBENCH_DATABASES_DIR = os.environ.get(
-    "LROBENCH_DATABASES_DIR", "./databases",
+    "LROBENCH_DATABASES_DIR", "/localhome/hza214/LLMSQL/databases/",
 )
 
 
@@ -410,9 +410,9 @@ def _build_mmqa_q7() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
 
 
 def _build_cars_q3() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
-    data_dir = os.path.join(SEMBENCH_ROOT, "cars/data/sf_157376")
-    car = pd.read_csv(os.path.join(data_dir, "car_data_157376.csv"))
-    image = pd.read_csv(os.path.join(data_dir, "image_car_data_157376.csv"))
+    data_dir = os.path.join(SEMBENCH_ROOT, "cars/data/sf_9836")
+    car = pd.read_csv(os.path.join(data_dir, "car_data_9836.csv"))
+    image = pd.read_csv(os.path.join(data_dir, "image_car_data_9836.csv"))
     image["image_path"] = image["image_path"].apply(
         lambda p: os.path.join(SEMBENCH_ROOT.replace("/files", ""), str(p))
         if not str(p).startswith("/") else str(p)
@@ -445,9 +445,9 @@ def _build_cars_q4() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
 
 
 def _build_cars_q8() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
-    data_dir = os.path.join(SEMBENCH_ROOT, "cars/data/sf_157376")
-    car = pd.read_csv(os.path.join(data_dir, "car_data_157376.csv"))
-    image = pd.read_csv(os.path.join(data_dir, "image_car_data_157376.csv"))
+    data_dir = os.path.join(SEMBENCH_ROOT, "cars/data/sf_9836")
+    car = pd.read_csv(os.path.join(data_dir, "car_data_9836.csv"))
+    image = pd.read_csv(os.path.join(data_dir, "image_car_data_9836.csv"))
     image["image_path"] = image["image_path"].apply(
         lambda p: os.path.join(SEMBENCH_ROOT.replace("/files", ""), str(p))
         if not str(p).startswith("/") else str(p)
