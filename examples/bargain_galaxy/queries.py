@@ -35,7 +35,7 @@ SEMBENCH_ROOT = os.environ.get(
     "SEMBENCH_ROOT", "/localhome/hza214/SemBench/files",
 )
 LROBENCH_DATABASES_DIR = os.environ.get(
-    "LROBENCH_DATABASES_DIR", "./databases",
+    "LROBENCH_DATABASES_DIR", "/localhome/hza214/LLMSQL/databases/",
 )
 
 
@@ -170,6 +170,73 @@ def _ecomm_styles(data_dir: str) -> pd.DataFrame:
         "baseColour", "colour1", "colour2",
     )]
     return styles.drop(columns=[c for c in drop_cols if c in styles.columns])
+
+
+def _struct_field(value: Any, key: str) -> str:
+    """Read ``key`` from a nested parquet struct (dict or namedtuple-ish)."""
+    if isinstance(value, dict):
+        return str(value.get(key, "") or "")
+    attr = getattr(value, key, "") if value is not None else ""
+    return str(attr or "")
+
+
+def _build_ecomm_q6() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
+    data_dir = os.path.join(SEMBENCH_ROOT, "ecomm/data/sf_4000")
+    styles = pd.read_parquet(os.path.join(data_dir, "styles_details.parquet"))
+    image_map = pd.read_parquet(os.path.join(data_dir, "image_mapping.parquet"))
+
+    styles["master_type"] = styles["masterCategory"].apply(
+        lambda d: _struct_field(d, "typeName")
+    )
+    styles["sub_type"] = styles["subCategory"].apply(
+        lambda d: _struct_field(d, "typeName")
+    )
+    styles = styles[
+        (styles["master_type"] == "Apparel")
+        & (~styles["sub_type"].isin(
+            ["Saree", "Apparel Set", "Loungewear and Nightwear"]))
+    ]
+
+    keep_ids = set(styles["id"].astype(str))
+    image_map = image_map[image_map["id"].astype(str).isin(keep_ids)]
+    image_map["image_filepath"] = image_map["filename"].apply(
+        lambda f: os.path.join(data_dir, "images", str(f))
+    )
+    left = image_map.rename(columns={
+        "id": "left_id", "image_filepath": "left_image_filepath",
+    })[["left_id", "left_image_filepath"]]
+
+    category_descriptions = [
+        ("Dress",
+         "A dress is a one-piece outer garment that is worn on the torso, hangs "
+         "down over the legs, and often consists of a bodice attached to a skirt."),
+        ("Bottomwear",
+         "Bottomwear refers to clothing worn on the lower part of the body, such "
+         "as trousers, jeans, skirts, shorts, and leggings."),
+        ("Socks",
+         "Socks are a type of clothing worn on the feet, typically made of soft "
+         "fabric, designed to provide comfort and warmth."),
+        ("Topwear",
+         "Topwear refers to clothing worn on the upper part of the body, such as "
+         "shirts, blouses, t-shirts, and jackets."),
+        ("Innerwear",
+         "Innerwear refers to clothing worn beneath outer garments, typically "
+         "close to the skin, such as underwear, bras, and undershirts."),
+    ]
+    right = pd.DataFrame(
+        category_descriptions, columns=["right_category", "right_description"]
+    )
+
+    prompt = (
+        'Does this product image show a "{right_category}"?\n'
+        "Category definition: {right_description}\n"
+        "Answer True if the image depicts this category, False otherwise.\n\n"
+        "Image: {image:left_image_filepath}"
+    )
+    return _join_records(
+        left, right, prompt,
+        left_id_cols=("left_id",), right_id_cols=("right_category",),
+    )
 
 
 def _build_ecomm_q7() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
@@ -343,9 +410,9 @@ def _build_mmqa_q7() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
 
 
 def _build_cars_q3() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
-    data_dir = os.path.join(SEMBENCH_ROOT, "cars/data/sf_157376")
-    car = pd.read_csv(os.path.join(data_dir, "car_data_157376.csv"))
-    image = pd.read_csv(os.path.join(data_dir, "image_car_data_157376.csv"))
+    data_dir = os.path.join(SEMBENCH_ROOT, "cars/data/sf_9836")
+    car = pd.read_csv(os.path.join(data_dir, "car_data_9836.csv"))
+    image = pd.read_csv(os.path.join(data_dir, "image_car_data_9836.csv"))
     image["image_path"] = image["image_path"].apply(
         lambda p: os.path.join(SEMBENCH_ROOT.replace("/files", ""), str(p))
         if not str(p).startswith("/") else str(p)
@@ -363,8 +430,10 @@ def _build_cars_q3() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
 
 
 def _build_cars_q4() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
-    data_dir = os.path.join(SEMBENCH_ROOT, "cars/data/sf_157376")
-    complaints = pd.read_csv(os.path.join(data_dir, "text_complaints_data_157376.csv"))
+    # sf_9836 so the predicted car_id universe matches the row-level
+    # ground truth (Q4_ground_truth_rows_sf9836.csv) used by the scorer.
+    data_dir = os.path.join(SEMBENCH_ROOT, "cars/data/sf_9836")
+    complaints = pd.read_csv(os.path.join(data_dir, "text_complaints_data_9836.csv"))
     df = complaints[["car_id", "summary"]]
     prompt = (
         "You are given a textual complaint about a vehicle. Return true if "
@@ -376,9 +445,9 @@ def _build_cars_q4() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
 
 
 def _build_cars_q8() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
-    data_dir = os.path.join(SEMBENCH_ROOT, "cars/data/sf_157376")
-    car = pd.read_csv(os.path.join(data_dir, "car_data_157376.csv"))
-    image = pd.read_csv(os.path.join(data_dir, "image_car_data_157376.csv"))
+    data_dir = os.path.join(SEMBENCH_ROOT, "cars/data/sf_9836")
+    car = pd.read_csv(os.path.join(data_dir, "car_data_9836.csv"))
+    image = pd.read_csv(os.path.join(data_dir, "image_car_data_9836.csv"))
     image["image_path"] = image["image_path"].apply(
         lambda p: os.path.join(SEMBENCH_ROOT.replace("/files", ""), str(p))
         if not str(p).startswith("/") else str(p)
@@ -397,6 +466,39 @@ def _build_animals_q1() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
     df = pd.read_csv(os.path.join(data_dir, "image_data.csv"))
     prompt = "Does the image contain a zebra? Image: {image:ImagePath}"
     return _filter_records(df, prompt, id_columns=("ImagePath",))
+
+
+def _build_movie_q5() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
+    csv_path = os.path.join(SEMBENCH_ROOT, "movie/data/sf_1000/Reviews.csv")
+    reviews = pd.read_csv(csv_path)
+    reviews = reviews[
+        (reviews["id"] == "ant_man_and_the_wasp_quantumania")
+        & reviews["reviewText"].notna()
+    ]
+    left = reviews.rename(columns={
+        "id": "left_id", "reviewId": "left_reviewId",
+        "reviewText": "left_reviewText",
+    })[["left_id", "left_reviewId", "left_reviewText"]]
+    right = reviews.rename(columns={
+        "id": "right_id", "reviewId": "right_reviewId",
+        "reviewText": "right_reviewText",
+    })[["right_id", "right_reviewId", "right_reviewText"]]
+
+    prompt = (
+        "These two movie reviews express the same sentiment - either both are "
+        "positive or both are negative.\n"
+        'Review 1: "{left_reviewText}"\n'
+        'Review 2: "{right_reviewText}"'
+    )
+    # Key layout = (left_reviewId, movie_id, right_reviewId); drop_self_join
+    # removes reflexive pairs by comparing the first id column of each side
+    # (left_reviewId vs right_reviewId).
+    return _join_records(
+        left, right, prompt,
+        left_id_cols=("left_reviewId", "left_id"),
+        right_id_cols=("right_reviewId",),
+        drop_self_join=True,
+    )
 
 
 # --- LRobench match queries ----------------------------------------------
@@ -486,6 +588,125 @@ def _build_match107() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
     )
 
 
+def _build_match113() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
+    home = _lro_csv(
+        "santos/home_office_senior_officials_travel_data_return.csv"
+    )
+    left = (
+        home.rename(columns={"Name of Official": "left_name"})[["left_name"]]
+        .dropna().drop_duplicates(subset=["left_name"])
+    )
+    travel = _lro_csv("santos/travel-exp-April-June-2018.csv")
+    right = (
+        travel.rename(columns={"Senior Officials Name": "right_name"})[["right_name"]]
+        .dropna().drop_duplicates(subset=["right_name"])
+    )
+    prompt = (
+        "Determine whether the two senior government official names share the "
+        "same first name (first given name, ignoring middle names / hyphenated "
+        "parts).\n\n"
+        "Official A: {left_name}\n"
+        "Official B: {right_name}"
+    )
+    return _join_records(
+        left, right, prompt,
+        left_id_cols=("left_name",), right_id_cols=("right_name",),
+    )
+
+
+def _build_match121() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
+    april = _lro_csv("santos/01.Apr_2018.csv")
+    left = (
+        april.rename(columns={"Supplier": "left_Supplier"})[["left_Supplier"]]
+        .dropna().drop_duplicates(subset=["left_Supplier"])
+    )
+    may = _lro_csv("santos/2015_05_expenditure.csv")
+    right = (
+        may.rename(columns={"Supplier": "right_Supplier"})[["right_Supplier"]]
+        .dropna().drop_duplicates(subset=["right_Supplier"])
+    )
+    prompt = (
+        "Determine whether these two supplier names refer to the same "
+        "organisation (ignoring case, abbreviations, punctuation, trailing "
+        "legal suffixes such as Ltd/Limited, and minor formatting "
+        "differences).\n\n"
+        "Supplier A: {left_Supplier}\n"
+        "Supplier B: {right_Supplier}"
+    )
+    return _join_records(
+        left, right, prompt,
+        left_id_cols=("left_Supplier",), right_id_cols=("right_Supplier",),
+    )
+
+
+def _build_match202() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
+    yelp = _lro_csv("restaurants2/yelp.csv")
+    yelp = yelp[pd.to_numeric(yelp["zip"], errors="coerce") == 60642]
+    left = yelp.rename(columns={
+        "ID": "left_ID", "name": "left_name", "address": "left_address",
+        "phone": "left_phone", "cuisine": "left_cuisine",
+    })[["left_ID", "left_name", "left_address", "left_phone", "left_cuisine"]]
+
+    zomato = _lro_csv("restaurants2/zomato.csv")
+    zomato = zomato[pd.to_numeric(zomato["zip"], errors="coerce") == 60642]
+    right = zomato.rename(columns={
+        "ID": "right_ID", "name": "right_name", "address": "right_address",
+        "phone": "right_phone", "cuisine": "right_cuisine",
+    })[["right_ID", "right_name", "right_address", "right_phone", "right_cuisine"]]
+
+    prompt = (
+        "Determine whether the two restaurant records refer to the same "
+        "real-world restaurant (same establishment at the same address).\n\n"
+        "Yelp: name={left_name} | address={left_address} | "
+        "phone={left_phone} | cuisine={left_cuisine}\n"
+        "Zomato: name={right_name} | address={right_address} | "
+        "phone={right_phone} | cuisine={right_cuisine}"
+    )
+    return _join_records(
+        left, right, prompt,
+        left_id_cols=("left_ID",), right_id_cols=("right_ID",),
+    )
+
+
+def _column_descriptor_df(csv_path: str, side: str, sample_n: int = 5) -> pd.DataFrame:
+    """One row per column of ``csv_path``: ``({side}_colname, {side}_samples)``.
+
+    ``{side}_samples`` joins up to ``sample_n`` non-null example values with
+    " | ", giving the LLM enough context to judge schema-level matches.
+    """
+    pdf = pd.read_csv(csv_path, nrows=500)
+    rows = []
+    for c in pdf.columns:
+        vals = pdf[c].dropna().astype(str).head(sample_n).tolist()
+        rows.append({
+            f"{side}_colname": c,
+            f"{side}_samples": " | ".join(vals) if vals else "",
+        })
+    return pd.DataFrame(rows)
+
+
+def _build_match305() -> Tuple[List[BargainRecord], List[Tuple[Any, ...]]]:
+    left = _column_descriptor_df(
+        os.path.join(LROBENCH_DATABASES_DIR, "california_schools/frpm.csv"),
+        "left",
+    )
+    right = _column_descriptor_df(
+        os.path.join(LROBENCH_DATABASES_DIR, "california_schools/schools.csv"),
+        "right",
+    )
+    prompt = (
+        "Determine whether the two columns from different tables describe the "
+        "same real-world feature (same semantic attribute), using the column "
+        "names and sample values.\n\n"
+        "Table A column: name={left_colname} | samples={left_samples}\n"
+        "Table B column: name={right_colname} | samples={right_samples}"
+    )
+    return _join_records(
+        left, right, prompt,
+        left_id_cols=("left_colname",), right_id_cols=("right_colname",),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Match query ground-truth synthesis (verbatim from the LLMSQL grid).
 # Stored as one CSV per query under <results_dir>/<query>_gt.csv so the
@@ -511,6 +732,36 @@ _MATCH_GT: Dict[str, List[Tuple[Any, Any]]] = {
         (23523, 10257), (26556, 13274), (29000, 13274), (31444, 15722),
         (31445, 15722), (31448, 15722), (31457, 15722), (32891, 15722),
         (33377, 15722), (36248, 17642), (41673, 19694),
+    ],
+    "match113": [
+        ('Mark Sedwill ',  'Mark Bryson-Richardson'),
+        ('Richard Clarke', 'Richard Montgomery'),
+    ],
+    "match121": [
+        ('Nhs Supply Chain',                 'NHS SUPPLY CHAIN'),
+        ('Novartis Pharmaceuticals Uk Ltd',  'NOVARTIS PHARMACEUTICALS UK LTD'),
+        ('Roche Diagnostics Limited',        'ROCHE PRODUCTS LTD'),
+        ('Csc',                              'CSC COMPUTER SCIENCES LTD'),
+        ('Philips Healthcare',               'PHILIPS HEALTHCARE'),
+        ('Nhs Blood And Transplant',         'NHS BLOOD & TRANSPLANT'),
+        ('NHS Litigation Authority',         'NHS LITIGATION AUTHORITY'),
+    ],
+    "match202": [
+        (2, 844), (72, 1020), (90, 744), (111, 564),
+        (198, 1022), (275, 272), (333, 134), (418, 590),
+    ],
+    "match305": [
+        ('CDSCode',                  'CDSCode'),
+        ('County Code',              'County'),
+        ('District Code',            'NCESDist'),
+        ('District Name',            'District'),
+        ('School Name',              'School'),
+        ('District Type ',           'DOCType'),
+        ('School Type',              'SOCType'),
+        ('Educational Option Type',  'EdOpsName'),
+        ('Charter School (Y/N)',     'Charter'),
+        ('Charter School Number',    'CharterNum'),
+        ('Charter Funding Type',     'FundingType'),
     ],
 }
 
@@ -576,11 +827,30 @@ def _cars_q8_score(predicted_keys, gt_path):
     return scorers.score_cars_q8((k[0] for k in predicted_keys), gt_path)
 
 
+def _ecomm_q6_score(predicted_keys, gt_path):
+    return scorers.score_classify_macro_f1(
+        predicted_keys, gt_path,
+        id_col="id", cat_col="category", fallback_category="Topwear",
+    )
+
+
+def _movie_q5_score(predicted_keys, gt_path):
+    return scorers.score_movie_pairs(predicted_keys, gt_path)
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 def build_query_registry(results_dir: str) -> Dict[str, Query]:
     return {
+        "ecomm_q6": Query(
+            tag="ecomm_q6", kind="join", modality="multimodal",
+            prompt="see _build_ecomm_q6",
+            gt_path=os.path.join(SEMBENCH_ROOT, "ecomm/raw_results/ground_truth/Q6.csv"),
+            score_fn=_ecomm_q6_score,
+            build_fn=_build_ecomm_q6,
+            id_components=("left_id", "right_category"),
+        ),
         "ecomm_q7": Query(
             tag="ecomm_q7", kind="join", modality="text",
             prompt="see _build_ecomm_q7",
@@ -640,7 +910,10 @@ def build_query_registry(results_dir: str) -> Dict[str, Query]:
         "cars_q4": Query(
             tag="cars_q4", kind="filter", modality="text",
             prompt="see _build_cars_q4",
-            gt_path=os.path.join(SEMBENCH_ROOT, "cars/raw_results/ground_truth/Q4.csv"),
+            gt_path=os.path.join(
+                SEMBENCH_ROOT,
+                "cars/raw_results/ground_truth/Q4_ground_truth_rows_sf9836.csv",
+            ),
             score_fn=_cars_q4_score,
             build_fn=_build_cars_q4,
             id_components=("car_id",),
@@ -660,6 +933,14 @@ def build_query_registry(results_dir: str) -> Dict[str, Query]:
             score_fn=_animals_q1_score,
             build_fn=_build_animals_q1,
             id_components=("ImagePath",),
+        ),
+        "movie_q5": Query(
+            tag="movie_q5", kind="join", modality="text",
+            prompt="see _build_movie_q5",
+            gt_path=os.path.join(SEMBENCH_ROOT, "movie/raw_results/ground_truth/Q5.csv"),
+            score_fn=_movie_q5_score,
+            build_fn=_build_movie_q5,
+            id_components=("left_reviewId", "left_id", "right_reviewId"),
         ),
         "match102": Query(
             tag="match102", kind="join", modality="text",
@@ -693,6 +974,38 @@ def build_query_registry(results_dir: str) -> Dict[str, Query]:
             build_fn=_build_match107,
             id_components=("left_id", "right_id"),
         ),
+        "match113": Query(
+            tag="match113", kind="join", modality="text",
+            prompt="see _build_match113",
+            gt_path=write_match_gt("match113", results_dir),
+            score_fn=_join_pair_id_score(scorers.score_id_set),
+            build_fn=_build_match113,
+            id_components=("left_name", "right_name"),
+        ),
+        "match121": Query(
+            tag="match121", kind="join", modality="text",
+            prompt="see _build_match121",
+            gt_path=write_match_gt("match121", results_dir),
+            score_fn=_join_pair_id_score(scorers.score_id_set),
+            build_fn=_build_match121,
+            id_components=("left_Supplier", "right_Supplier"),
+        ),
+        "match202": Query(
+            tag="match202", kind="join", modality="text",
+            prompt="see _build_match202",
+            gt_path=write_match_gt("match202", results_dir),
+            score_fn=_join_pair_id_score(scorers.score_id_set),
+            build_fn=_build_match202,
+            id_components=("left_ID", "right_ID"),
+        ),
+        "match305": Query(
+            tag="match305", kind="join", modality="text",
+            prompt="see _build_match305",
+            gt_path=write_match_gt("match305", results_dir),
+            score_fn=_join_pair_id_score(scorers.score_id_set),
+            build_fn=_build_match305,
+            id_components=("left_colname", "right_colname"),
+        ),
     }
 
 
@@ -700,18 +1013,20 @@ def build_query_registry(results_dir: str) -> Dict[str, Query]:
 # Default subsets exposed via the CLI
 # ---------------------------------------------------------------------------
 ALL_TAGS: Tuple[str, ...] = (
-    "ecomm_q7", "ecomm_q8", "ecomm_q9", "ecomm_q13",
-    "mmqa_q2a", "mmqa_q7",
+    "mmqa_q7", "mmqa_q2a",
+    "ecomm_q6", "ecomm_q7", "ecomm_q8", "ecomm_q9", "ecomm_q13",
     "cars_q3", "cars_q4", "cars_q8",
     "animals_q1",
-    "match102", "match104", "match105", "match107",
+    "movie_q5",
+    "match113", "match121", "match202", "match305",
 )
 
 GROUPS: Dict[str, Tuple[str, ...]] = {
-    "ecomm": ("ecomm_q7", "ecomm_q8", "ecomm_q9", "ecomm_q13"),
+    "ecomm": ("ecomm_q6", "ecomm_q7", "ecomm_q8", "ecomm_q9", "ecomm_q13"),
     "mmqa": ("mmqa_q2a", "mmqa_q7"),
     "cars": ("cars_q3", "cars_q4", "cars_q8"),
     "animals": ("animals_q1",),
-    "match": ("match102", "match104", "match105", "match107"),
+    "movie": ("movie_q5",),
+    "match": ("match113", "match121", "match202", "match305"),
     "all": ALL_TAGS,
 }

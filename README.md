@@ -201,3 +201,6 @@ BARGAIN performs at most `budget` number of oracle calls, but returns an output 
   year={2025}
 }
 
+
+export BARGAIN_PROXY_URL=http://localhost:8001/v1
+export BARGAIN_ORACLE_URL=http://localhost:8000/v1

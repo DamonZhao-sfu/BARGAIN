@@ -172,42 +172,48 @@ def score_cars_q3(predicted_vins: Iterable[str], gt_path: str) -> Tuple[float, f
     )
 
 
-def score_cars_q4(
-    predicted_ids: Iterable[str], gt_path: str,
-    cars_csv: str | None = None,
-) -> Tuple[float, float, float]:
-    """Q4 evaluates a scalar (avg car age over engine-problem cars).
+def score_cars_q4(predicted_ids: Iterable[str], gt_path: str) -> Tuple[float, float, float]:
+    """Row-level F1 for Q4 (engine-complaint filter).
 
-    Returns ``1 - min(relative_error, 1)`` as the F1 proxy so the
-    column type matches the other scorers.
+    Scores the predicted positive car_ids against the per-row ground truth
+    at ``gt_path`` (``Q4_ground_truth_rows_sf9836.csv`` — one positive row
+    per engine-complaint car): precision / recall / F1 over car_id sets,
+    mirroring the other set-based filter scorers. Replaces the legacy
+    average-age relative-error proxy so F1 is the run's quality metric.
+
+    Diagnostic note: the printed GT / Pred / TP counts make a dataset
+    scale-factor mismatch obvious — if the predicted car_ids come from a
+    different scale factor than the ground-truth rows, TP collapses to ~0.
     """
-    pred_ids = {int(p) for p in (_normalize_car_id(v) for v in predicted_ids) if p}
-    if not pred_ids:
-        print(f"  [cars_q4] no predicted ids — F1=0")
+    try:
+        gt_df = pd.read_csv(gt_path, dtype=str)
+    except Exception as e:  # noqa: BLE001 — degrade to F1=0 on read failure
+        print(f"  [cars_q4] Error reading ground truth: {e}")
         return 0.0, 0.0, 0.0
+    gt_col = "car_id" if "car_id" in gt_df.columns else gt_df.columns[0]
+    gt_ids = {
+        cid for cid in (_normalize_car_id(v) for v in gt_df[gt_col].dropna())
+        if cid is not None
+    }
 
-    if cars_csv is None:
-        # Fall back to the canonical SemBench location used by LLMSQL.
-        cars_csv = "/localhome/hza214/SemBench/files/cars/data/sf_157376/car_data_157376.csv"
+    pred_ids = {
+        cid for cid in (_normalize_car_id(v) for v in predicted_ids)
+        if cid is not None
+    }
 
-    cars_df = pd.read_csv(cars_csv)
-    matched = cars_df[cars_df["car_id"].isin(pred_ids)]
-    if matched.empty:
-        print(f"  [cars_q4] no predicted ids matched cars table — F1=0")
-        return 0.0, 0.0, 0.0
-    pred_avg_age = float(2026 - matched["year"].mean())
-
-    scalar_gt = pd.read_csv(gt_path)
-    gt_avg_age = float(scalar_gt.iloc[0, 0])
-    abs_err = abs(pred_avg_age - gt_avg_age)
-    rel_err = abs_err / max(abs(gt_avg_age), 1e-12)
-    score = 1.0 - min(rel_err, 1.0)
+    tp = len(gt_ids & pred_ids)
+    fp = len(pred_ids - gt_ids)
+    fn = len(gt_ids - pred_ids)
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2 * precision * recall / (precision + recall)
+          if (precision + recall) > 0 else 0.0)
     print(
-        f"  [cars_q4] predicted_count={len(pred_ids)} "
-        f"pred_avg_age={pred_avg_age:.4f} gt_avg_age={gt_avg_age:.4f} "
-        f"rel_err={rel_err:.4f} score={score:.4f}"
+        f"  [cars_q4] GT: {len(gt_ids)}, Pred: {len(pred_ids)}, "
+        f"TP={tp} FP={fp} FN={fn}"
     )
-    return score, score, score
+    print(f"  [cars_q4] P={precision:.4f} R={recall:.4f} F1={f1:.4f}")
+    return precision, recall, f1
 
 
 def score_animals_q1(predicted_ids: Iterable[str], gt_path: str) -> Tuple[float, float, float]:
@@ -223,3 +229,126 @@ def score_animals_q1(predicted_ids: Iterable[str], gt_path: str) -> Tuple[float,
         f"rel_err={rel_err:.4f} score={score:.4f}"
     )
     return score, score, score
+
+
+# --- movie q5 / q7: unordered review-pair F1 ---------------------------
+def score_movie_pairs(
+    predicted_keys: Iterable[Sequence], gt_path: str,
+) -> Tuple[float, float, float]:
+    """Set-based F1 over unordered ``(movie_id, {reviewId_a, reviewId_b})``
+    pairs.
+
+    ``predicted_keys`` are ``(left_reviewId, movie_id, right_reviewId)``
+    triples (the key layout produced by the movie self-join builder).
+    Reflexive pairs (a review compared with itself) are dropped, and the
+    two review ids are sorted so ``(a, b)`` and ``(b, a)`` collapse to a
+    single pair. The ground-truth CSV stores one pair per row with
+    columns ``[movie_id, reviewId_a, reviewId_b]`` (matching the LLMSQL
+    grid's ``calculate_pair_f1`` layout).
+    """
+    sys_pairs: Set = set()
+    for key in predicted_keys:
+        rid1, movie_id, rid2 = str(key[0]).strip(), str(key[1]).strip(), str(key[2]).strip()
+        if rid1 == rid2:
+            continue
+        sys_pairs.add((movie_id, tuple(sorted([rid1, rid2]))))
+
+    gt_df = pd.read_csv(gt_path)
+    cols = list(gt_df.columns)
+    gt_pairs: Set = set()
+    for _, row in gt_df.iterrows():
+        if len(cols) < 3:
+            continue
+        mid, v1, v2 = row[cols[0]], row[cols[1]], row[cols[2]]
+        if pd.notna(mid) and pd.notna(v1) and pd.notna(v2):
+            gt_pairs.add((str(mid).strip(), tuple(sorted([str(v1).strip(), str(v2).strip()]))))
+
+    p, r, f1 = _set_f1(sys_pairs, gt_pairs)
+    print(f"  [movie] GT={len(gt_pairs)} Pred={len(sys_pairs)} P={p:.4f} R={r:.4f} F1={f1:.4f}")
+    return p, r, f1
+
+
+# --- classify (sem_join images/rows × categories) macro F1 -------------
+def _norm_category(value) -> str | None:
+    if value is None:
+        return None
+    s = str(value).strip().lower().replace("\n", "")
+    if s in ("", "nan"):
+        return None
+    return s
+
+
+def score_classify_macro_f1(
+    predicted_keys: Iterable[Sequence],
+    gt_path: str,
+    *,
+    id_col: str,
+    cat_col: str,
+    fallback_category: str,
+) -> Tuple[float, float, float]:
+    """Macro-averaged precision/recall/F1 for a CLASSIFY-style join.
+
+    A classify query is decomposed into ``(record × category)`` pairs;
+    BARGAIN returns the positive pairs. For each record we keep the first
+    positive category as its predicted class; records with no positive
+    pair fall back to ``fallback_category``. We then compare against the
+    per-record ground-truth class and macro-average the per-class F1 over
+    the union of classes present in the truth or predictions (matching
+    sklearn's ``average='macro'`` with ``zero_division=0``).
+
+    ``predicted_keys`` are ``(record_id, category)`` tuples.
+    """
+    pred_dict: dict = {}
+    for key in predicted_keys:
+        rid = str(key[0]).strip()
+        cat = _norm_category(key[1])
+        if cat is None:
+            continue
+        pred_dict.setdefault(rid, cat)  # keep the first positive category
+
+    gt_df = pd.read_csv(gt_path, dtype=str)
+    gt_df.columns = [c.strip().lower() for c in gt_df.columns]
+    id_c = id_col.strip().lower()
+    cat_c = cat_col.strip().lower()
+    if id_c not in gt_df.columns or cat_c not in gt_df.columns:
+        id_c, cat_c = gt_df.columns[0], gt_df.columns[1]
+
+    fb = _norm_category(fallback_category)
+    y_true: list = []
+    y_pred: list = []
+    n_fallback = 0
+    for _, row in gt_df.iterrows():
+        rid = str(row[id_c]).strip()
+        gt_cat = _norm_category(row[cat_c])
+        if gt_cat is None:
+            continue
+        y_true.append(gt_cat)
+        if rid in pred_dict:
+            y_pred.append(pred_dict[rid])
+        else:
+            y_pred.append(fb)
+            n_fallback += 1
+
+    labels = sorted(set(y_true) | set(y_pred))
+    ps: list = []
+    rs: list = []
+    fs: list = []
+    for lab in labels:
+        tp = sum(1 for t, p in zip(y_true, y_pred) if t == lab and p == lab)
+        fp = sum(1 for t, p in zip(y_true, y_pred) if t != lab and p == lab)
+        fn = sum(1 for t, p in zip(y_true, y_pred) if t == lab and p != lab)
+        p = tp / (tp + fp) if (tp + fp) else 0.0
+        r = tp / (tp + fn) if (tp + fn) else 0.0
+        f = 2 * p * r / (p + r) if (p + r) else 0.0
+        ps.append(p)
+        rs.append(r)
+        fs.append(f)
+    macro_p = sum(ps) / len(ps) if ps else 0.0
+    macro_r = sum(rs) / len(rs) if rs else 0.0
+    macro_f1 = sum(fs) / len(fs) if fs else 0.0
+    print(
+        f"  [classify] GT={len(y_true)} matched={len(y_true) - n_fallback} "
+        f"fallback={n_fallback} (-> '{fallback_category}') "
+        f"P={macro_p:.4f} R={macro_r:.4f} F1={macro_f1:.4f}"
+    )
+    return macro_p, macro_r, macro_f1
